@@ -1,0 +1,70 @@
+name: experiment-ci-cd #Nome do workflow
+on: 
+  pull_request:
+    branches:
+      - main #Executar quando houver um pull_request na branch main
+jobs: #Define os 3 Jobs que serão executados no workflow
+  build: #Job responsável por compilar o projeto
+    runs-on: ubuntu-latest #Os comandos serão executados na última versão da distribuição Ubuntu
+    permissions:
+      contents: write #Permissão de escrita em conteúdos
+    steps:
+      - name: Repo checkout #Nome da etapa que usará uma actions para clonar o repositório do GH
+        uses: actions/checkout@v3 #Action reusável que clona o repo do GH na estação de trabalho
+
+      - name: Espressif IoT Development Framework (ESP-IDF) #Interação com o ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1.1.0 #Action fornecida pela Espressif
+        with:
+          esp_idf_version: v4.4 #Versão do ESP-IDF a ser utilizada
+          target: esp32 #Especifica a plataforma de compilação
+
+      - name: Store Artifacts 
+        uses: actions/upload-artifact@v3 #Armazena os artefatos gerados pela compilação
+        with:
+          name: experiment-ci-cd #Especifica o nome do artefato criado
+          path: build/experiment-ci-cd.bin
+
+  test: #Job responsável por compilar os testes unitários e gerar os artefatos relacionados
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+    needs: [build] #Job test só será executado se o Job build for bem-sucedido
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v3
+
+      - name: Build tests
+        run: |
+          sudo apt-get install libcriterion-dev
+          sudo apt-get install meson
+          cd test
+          gcc -o test test.c -lcriterion
+          ./test --xml > test.xml
+     
+      - name: Show results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always() #Sempre executa essa etapa
+        with:
+          files: test/test.xml #Arquivo com os resultados dos testes
+
+  delivery:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs: [test] #Este job depende do job "test"
+    steps:
+      - name: Repo checkout
+        uses: actions/checkout@v3 #Clona o repositório do GitHub
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v3 #Baixa os artefatos gerados no job "build"
+        with:
+          name: experiment-ci-cd
+
+      - name: Create release
+        uses: ncipollo/release-action@v1.12.0 #Action para criar release
+        with:
+          artifacts: "experiment-ci-cd.bin" #Artefato que será criado na release
+          tag: 0.1.5 #Tag do release
+          bodyFile: "body.md" #Arquivo contendo o corpo do release
